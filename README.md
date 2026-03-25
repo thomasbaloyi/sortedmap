@@ -198,6 +198,46 @@ fmt.Println(m.CollectKeys()) // [Alice Bob Eve]
 fmt.Println(m.CollectValues()) // [26 31 84]
 ```
 
+### Using in a Struct
+
+`SortedMap` works naturally as a field in a struct. Here is a `Leaderboard` that keeps players ranked by score at all times:
+
+```go
+type Leaderboard struct {
+    scores *sm.SortedMap[map[string]int, string, int]
+}
+
+func NewLeaderboard() *Leaderboard {
+    return &Leaderboard{
+        scores: sm.New[map[string]int, string, int](func(i, j sm.KV[string, int]) bool {
+            if i.Val == j.Val {
+                return i.Key < j.Key // break ties alphabetically
+            }
+            return i.Val > j.Val // highest score first
+        }),
+    }
+}
+
+func (lb *Leaderboard) Record(player string, score int) {
+    lb.scores.Insert(player, score)
+}
+
+func (lb *Leaderboard) TopN(n int) []string {
+    keys := lb.scores.CollectKeys()
+    if n > len(keys) {
+        n = len(keys)
+    }
+    return keys[:n]
+}
+
+lb := NewLeaderboard()
+lb.Record("Alice", 1200)
+lb.Record("Bob", 950)
+lb.Record("Eve", 1200)
+
+fmt.Println(lb.TopN(2)) // [Alice Eve]  (tied at 1200, sorted alphabetically)
+```
+
 ## API and Complexity
 
 | Method          | Description                                                          | Complexity |
