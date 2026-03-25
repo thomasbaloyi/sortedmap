@@ -27,72 +27,175 @@ go get github.com/egregors/sortedmap
 
 ## Usage
 
-Here's a quick example of how to use the `sortedmap` package:
+### `New` — create an empty sorted map
+
+`New` creates an empty `SortedMap`. You supply a `less` function that defines the sort order.
 
 ```go
-package main
+m := sm.New[map[string]int, string, int](func(i, j sm.KV[string, int]) bool {
+    return i.Key < j.Key
+})
+m.Insert("Bob", 31)
+m.Insert("Alice", 26)
+fmt.Println(m.CollectKeys()) // [Alice Bob]
+```
 
-import (
-	"fmt"
+### `NewFromMap` — create a sorted map from an existing map
 
-	sm "github.com/egregors/sortedmap"
-)
+`NewFromMap` initializes a `SortedMap` from a regular Go map and a `less` function.
 
+```go
+m := sm.NewFromMap(map[string]int{
+    "Bob":   31,
+    "Alice": 26,
+    "Eve":   84,
+}, func(i, j sm.KV[string, int]) bool {
+    return i.Key < j.Key
+})
+fmt.Println(m.CollectKeys()) // [Alice Bob Eve]
+```
+
+You can sort by value instead of key, or combine both for stable ordering:
+
+```go
 type Person struct {
-	Name string
-	Age  int
+    Name string
+    Age  int
 }
 
-func main() {
-	// Create a new map sorted by keys
-	m := sm.NewFromMap(map[string]int{
-		"Bob":   31,
-		"Alice": 26,
-		"Eve":   84,
-	}, func(i, j sm.KV[string, int]) bool {
-		return i.Key < j.Key
-	})
+// Sort by age; break ties alphabetically by name
+m := sm.NewFromMap(map[string]Person{
+    "Bob":   {"Bob", 26},
+    "Alice": {"Alice", 26},
+    "Eve":   {"Eve", 84},
+}, func(i, j sm.KV[string, Person]) bool {
+    if i.Val.Age == j.Val.Age {
+        return i.Key < j.Key
+    }
+    return i.Val.Age < j.Val.Age
+})
+fmt.Println(m.CollectKeys()) // [Alice Bob Eve]
+```
 
-	fmt.Println(m.Collect())
-	// Output: map[Alice:26 Bob:31 Eve:84]
+### `Insert` — add or update an entry
 
-	m.Insert("Charlie", 34)
-	fmt.Println(m.Collect())
-	// Output: map[Alice:26 Bob:31 Charlie:34 Eve:84]
+`Insert` adds a new key-value pair. If the key already exists it is replaced, and the heap is updated to reflect the new value.
 
-	m.Delete("Bob")
-	fmt.Println(m.Collect())
-	// Output: map[Alice:26 Charlie:34 Eve:84]
+```go
+m.Insert("Charlie", 34)
+fmt.Println(m.CollectKeys()) // [Alice Bob Charlie Eve]
+```
 
-	// Create a new map sorted by values
-	m2 := sm.NewFromMap(map[string]Person{
-		"Bob":   {"Bob", 31},
-		"Alice": {"Alice", 26},
-		"Eve":   {"Eve", 84},
-	}, func(i, j sm.KV[string, Person]) bool {
-		return i.Val.Age < j.Val.Age
-	})
+### `Get` — retrieve a value by key
 
-	fmt.Println(m2.Collect())
-	// Output: map[Alice:{Alice 26} Bob:{Bob 31} Eve:{Eve 84}]
+`Get` returns the value for a key and a boolean indicating whether the key was found.
 
-	// Create a new map sorted by values but if the values are equal, sort by keys
-	m3 := sm.NewFromMap(map[string]Person{
-		"Bob":   {"Bob", 26},
-		"Alice": {"Alice", 26},
-		"Eve":   {"Eve", 84},
-	}, func(i, j sm.KV[string, Person]) bool {
-		if i.Val.Age == j.Val.Age {
-			return i.Key < j.Key
-		}
-
-		return i.Val.Age < j.Val.Age
-	})
-
-	fmt.Println(m3.Collect())
-	// Output: map[Alice:{Alice 26} Bob:{Bob 26} Eve:{Eve 84}]
+```go
+val, ok := m.Get("Alice")
+if ok {
+    fmt.Println(val) // 26
 }
 
+_, ok = m.Get("nobody")
+fmt.Println(ok) // false
+```
+
+### `Delete` — remove an entry
+
+`Delete` removes a key from the map. It returns a pointer to the removed value and a boolean indicating whether the key existed.
+
+```go
+val, existed := m.Delete("Bob")
+if existed {
+    fmt.Println(*val) // 31
+}
+fmt.Println(m.CollectKeys()) // [Alice Charlie Eve]
+```
+
+### `Len` — number of entries
+
+`Len` returns the number of key-value pairs currently in the map.
+
+```go
+fmt.Println(m.Len()) // 3
+```
+
+### `All` — iterate in sorted order
+
+`All` returns an `iter.Seq2[K, V]` that yields key-value pairs in the order defined by the `less` function. Compatible with `range` in Go 1.23+.
+
+```go
+for k, v := range m.All() {
+    fmt.Printf("%s: %d\n", k, v)
+}
+// Alice: 26
+// Bob: 31
+// Eve: 84
+```
+
+### `Keys` — iterate over keys in sorted order
+
+`Keys` returns an `iter.Seq[K]` of keys in sorted order.
+
+```go
+for k := range m.Keys() {
+    fmt.Println(k)
+}
+// Alice
+// Bob
+// Eve
+```
+
+### `Values` — iterate over values in sorted order
+
+`Values` returns an `iter.Seq[V]` of values in sorted order.
+
+```go
+for v := range m.Values() {
+    fmt.Println(v)
+}
+// 26
+// 31
+// 84
+```
+
+### `Collect` — export as a regular map
+
+`Collect` returns a regular Go map. Note that Go maps are unordered — use `CollectAll`, `CollectKeys`, or `CollectValues` when insertion order matters.
+
+```go
+plain := m.Collect()
+fmt.Println(plain) // map[Alice:26 Bob:31 Eve:84]  (order not guaranteed)
+```
+
+### `CollectAll` — export as a slice of key-value pairs
+
+`CollectAll` returns a `[]KV[K, V]` slice in sorted order.
+
+```go
+pairs := m.CollectAll()
+for _, kv := range pairs {
+    fmt.Printf("%s: %d\n", kv.Key, kv.Val)
+}
+// Alice: 26
+// Bob: 31
+// Eve: 84
+```
+
+### `CollectKeys` — export keys as a slice
+
+`CollectKeys` returns a `[]K` slice of keys in sorted order.
+
+```go
+fmt.Println(m.CollectKeys()) // [Alice Bob Eve]
+```
+
+### `CollectValues` — export values as a slice
+
+`CollectValues` returns a `[]V` slice of values in sorted order.
+
+```go
+fmt.Println(m.CollectValues()) // [26 31 84]
 ```
 
 ## API and Complexity
